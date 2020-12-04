@@ -1,5 +1,5 @@
 import numpy as np 
-import pandas as pd
+# import pandas as pd
 
 class MyNeuralNetwork():
 	"""
@@ -48,14 +48,12 @@ class MyNeuralNetwork():
 			w_init = self.normal_init
 
 		self.W = []	# weights
-		self.X = []	# value of perceptron
 		self.B = []	# bias associated with perceptron
 
 		# FIXME : It would be greate to complete the list into numpy array
 
 		for i in range(1, n_layers) :
 			self.W.append(w_init((layer_sizes[i-1] , layer_sizes[i])))
-			self.X.append(w_init((layer_sizes[i] , )))				# just filling the space. however it would update in forward and backward phase, and does't affect algo based on weight_inits
 			self.B.append(w_init((layer_sizes[i] , )))
 
 		# print(W[1] , W[1][0] , W[1][0][0])
@@ -63,14 +61,19 @@ class MyNeuralNetwork():
 
 		if(ind == 0) :
 			self.activation = self.relu
+			self.activation_derivative = self.relu_grad
 		elif(ind == 1) :
 			self.activation = self.sigmoid
+			self.activation_derivative = self.sigmoid_grad
 		elif(ind == 2) :
 			self.activation = self.linear
+			self.activation_derivative = self.linear_grad
 		elif(ind == 3) :
 			self.activation = self.tanh
+			self.activation_derivative = self.tanh_grad
 		else :
 			self.activation = self.softmax
+			self.activation_derivative = self.sigmoid_grad
 
 		self.n_layers = n_layers
 		self.layer_sizes = layer_sizes
@@ -134,8 +137,7 @@ class MyNeuralNetwork():
 		-------
 		x_calc : 1-dimensional numpy array after calculating the necessary function over X
 		"""
-		sig = self.sigmoid(z)
-		return sig * (1-sig)
+		return X * (1-X)
 
 	def linear(self, X):
 		"""
@@ -235,7 +237,6 @@ class MyNeuralNetwork():
 		weight : 2-dimensional numpy array which contains the initial weights for the requested layer
 		"""
 		#  [np.random.randn(y,1) for y in a[:]]		for bias
-
 		return np.zeros(shape)
 
 	def random_init(self, shape):
@@ -266,18 +267,55 @@ class MyNeuralNetwork():
 		"""
 		return None # TODO : implement this
 
-	def forward_phase(self , input_layer):
+
+
+	def __forward_phase(self , input_layer):
+		"""
+		Feed the input layer to network, activate the output layer perceptron
+
+		Parameters
+		----------
+		input_layer : 1-dimensional numpy array which contains actication energy of input layer perceptron
+		"""
 		# for taking the inputs from input layer, hence appending input layer at index = -1
-		self.X.append(input_layer)
+		A = [a.copy() for a in self.B]			# cloning B for getting accurate shapes of layers
+		A.append(input_layer)					# we could have used insert(0,input_layer) but append is time efficient w.r.t new mempry allocation.
 
 		for i in range(1, self.n_layers) : # traversing from 1 to n_layer because layer 1 will use its synaptic weight (b/w layer 0 and 1) and layer 1 will be updated based on bias of layer
 			for j in range(self.layer_sizes[i]) :	# traversing over perceptron in specified layer
-				self.X[i-1][j] = np.dot(self.W[i-1][:,j] , self.X[i-2]) + self.B[i-1][j]			# storing the z function, activation function would be aplide over whole layer
-				# here X[i-1] is denoting perceptron of current layer, however X[i-2] denotes perceptron of previous layer
+				A[i-1][j] = np.dot(self.W[i-1][:,j] , A[i-2]) + self.B[i-1][j]			# storing the z function, activation function would be aplide over whole layer
+				# here A[i-1] is denoting perceptron of current layer, however A[i-2] denotes perceptron of previous layer
 				# W[i-1] denotes all the synaptic weights between layer i-1 and i.
 				# Similarly, B[i-1] is bias associated with current layer
-			self.X[i-1] = self.activation(self.X[i-1])				# appling activation after successfully calucalting z function for all perceptron in layer
-		self.X.pop()
+			A[i-1] = self.activation(A[i-1])				# appling activation after successfully calucalting z function for all perceptron in layer
+		# A.pop()		# poping out the input layer
+		# print(A)
+		return A
+	
+	def __backward_phase(self , A , y) :
+		Local_gradient = [a.copy() for a in A]			# cloning B for getting accurate shapes of layers and perceptron
+
+		Local_gradient[-2] = (y - A[-2]) * self.activation_derivative(A[-2])
+
+		for layer_num in range (self.n_layers - 2 , -1 , -1) :
+			# 2 (as last two layer are input and output) + 1 (last index is 1 less than len) = 3
+			# print(layer_num-1 , Local_gradient[layer_num-1].shape , A[layer_num-1].shape )
+			for perceptron_num in range (self.layer_sizes[layer_num]) :
+				# print('-->' , perceptron_num)
+				Local_gradient[layer_num-1][perceptron_num] = np.dot(self.W[layer_num][perceptron_num] , Local_gradient[layer_num])
+				# self.W[layer_num][perceptron_num] is weights between current layer's perceptron and right layer (i.e. next layer towards output layer).
+				# Local_gradient[layer_num] is calculated local gradient of right layer (i.e. next layer towards output layer)
+
+				# Local_gradient[layer_num-1][perceptron_num] = mul * self.activation_derivative(A[layer_num-1][perceptron_num])
+			Local_gradient[layer_num-1] = Local_gradient[layer_num-1] * self.activation_derivative(A[layer_num-1])
+
+		# print(Local_gradient)
+		# return np.array(Local_gradient , dtype=np.float ) * np.array(A , dtype= np.float)
+		# return np.array(Local_gradient) * np.array(A)
+
+		# need to return the theta = Local gradient * A
+
+
 
 	def fit(self, X, y):
 		"""
@@ -304,16 +342,26 @@ class MyNeuralNetwork():
 		2. compute cost at output layer
 		3. based upon previous step, do back_propogation
 		"""
+		if(self.batch_size > X.shape[0]) :
+			print('invalid batch size')
+			return
+
+		np.random.seed(12)
 
 		self.W[0][0][0] = 1
 		self.W[1][0][0] = 1
 
-		# forward phase
-		self.forward_phase(np.array([1.0,2.0,3.0]))
+		for _ in range(int(np.ceil(self.num_epochs / self.batch_size))) :
+			# building the batch
+			batch_index = np.random.choice(X.shape[0] , self.batch_size , replace=False)
+			for data_point in batch_index :
+				A = self.__forward_phase(X[data_point,:])
+				self.__backward_phase(A , y[data_point,:])
 
-		print('----')
-
-		print(self.X)
+				# updating the theta and delta W
+			# forward phase
+			# self.__forward_phase([np.array([1.0,2.0,3.0]) , np.zeros((3,))])
+			# self.__forward_phase(np.array([1.0,2.0,3.0]))
 
 		return self
 
@@ -373,5 +421,7 @@ class MyNeuralNetwork():
 # a.fit([1],[1])
 # MyNeuralNetwork(3 , [3,2,1] , 'sigmoid' , 0.01 , 'random' , 100 ,  100)
 
-a = MyNeuralNetwork(3 , [3,2,1] , 'tanh' , 0.01 , 'zero' , 100 ,  100)
-a.fit([1],[1])
+a = MyNeuralNetwork(3 , [3,2,1] , 'tanh' , 0.01 , 'zero' , 4 ,  1)
+X = np.array([np.array([1,2,3]),np.array([4,5,6]),np.array([7,8,9]),np.array([10,11,12])])
+y = np.array([np.array([1]),np.array([0]),np.array([1]),np.array([0])])
+a.fit(X,y)
