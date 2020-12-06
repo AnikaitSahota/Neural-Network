@@ -50,13 +50,13 @@ class MyNeuralNetwork():
 		self.W = []	# weights
 		self.B = []	# bias associated with perceptron
 
-		# FIXME : It would be greate to complete the list into numpy array
-
 		for i in range(1, n_layers) :
 			self.W.append(w_init((layer_sizes[i-1] , layer_sizes[i])))
 			self.B.append(w_init((layer_sizes[i] , )))
 
-		# print(W[1] , W[1][0] , W[1][0][0])
+		self.W = np.array(self.W , dtype = object)
+		self.B = np.array(self.B , dtype = object)
+		
 		ind = self.acti_fns.index(activation)
 
 		if(ind == 0) :
@@ -267,8 +267,6 @@ class MyNeuralNetwork():
 		"""
 		return None # TODO : implement this
 
-
-
 	def __forward_phase(self , input_layer):
 		"""
 		Feed the input layer to network, activate the output layer perceptron
@@ -278,7 +276,7 @@ class MyNeuralNetwork():
 		input_layer : 1-dimensional numpy array which contains actication energy of input layer perceptron
 		"""
 		# for taking the inputs from input layer, hence appending input layer at index = -1
-		A = [a.copy() for a in self.B]			# cloning B for getting accurate shapes of layers
+		A = [a.copy().astype(np.float) for a in self.B]			# cloning B for getting accurate shapes of layers
 		A.append(input_layer)					# we could have used insert(0,input_layer) but append is time efficient w.r.t new mempry allocation.
 
 		for i in range(1, self.n_layers) : # traversing from 1 to n_layer because layer 1 will use its synaptic weight (b/w layer 0 and 1) and layer 1 will be updated based on bias of layer
@@ -292,8 +290,8 @@ class MyNeuralNetwork():
 		# print(A)
 		return A
 	
-	def __backward_phase(self , A , y) :
-		Local_gradient = [a.copy() for a in A]			# cloning B for getting accurate shapes of layers and perceptron
+	def __backward_phase(self , A , y):
+		Local_gradient = [a.copy().astype(np.float) for a in A]			# cloning B for getting accurate shapes of layers and perceptron
 
 		Local_gradient[-2] = (y - A[-2]) * self.activation_derivative(A[-2])
 
@@ -309,13 +307,28 @@ class MyNeuralNetwork():
 				# Local_gradient[layer_num-1][perceptron_num] = mul * self.activation_derivative(A[layer_num-1][perceptron_num])
 			Local_gradient[layer_num-1] = Local_gradient[layer_num-1] * self.activation_derivative(A[layer_num-1])
 
-		# print(Local_gradient)
-		# return np.array(Local_gradient , dtype=np.float ) * np.array(A , dtype= np.float)
-		# return np.array(Local_gradient) * np.array(A)
+		# print(Local_gradient , A)
+		theta_W = []
+		for layer_num in range (self.n_layers-1) :
+			tmp = np.matmul(A[layer_num-1].reshape(-1,1) , Local_gradient[layer_num].reshape(1,-1))
+			theta_W.append(tmp)
 
-		# need to return the theta = Local gradient * A
+		Local_gradient.pop()																		# poping the input layer
+		return np.array(theta_W , dtype=object) , np.array(Local_gradient , dtype=object)
 
+		# return delta_W and delta_B
+		# return np.multiply(np.array(Local_gradient , dtype = object) , np.array(A , dtype = object))
 
+	def __update_NeuralNetwork(self , delta_W , delta_B):
+		self.W = self.W - delta_W
+		self.B = self.B - delta_B
+
+	def __onehot_code(self , y) :
+		one_hot_coded_y = np.zeros((y.shape[0] , self.layer_sizes[-1]))
+		for i in range(y.shape[0]) :
+			one_hot_coded_y[i,y[i]] = 1
+
+		return one_hot_coded_y
 
 	def fit(self, X, y):
 		"""
@@ -335,33 +348,37 @@ class MyNeuralNetwork():
 		# fit function has to return an instance of itself or else it won't work with test.py
 		# print(self.activation , self.batch_size , self.num_epochs)
 
-		"""
-		TODO : what to implement in fit function
-
-		1. feed the dataset X , y to network
-		2. compute cost at output layer
-		3. based upon previous step, do back_propogation
-		"""
 		if(self.batch_size > X.shape[0]) :
 			print('invalid batch size')
 			return
 
 		np.random.seed(12)
 
-		self.W[0][0][0] = 1
-		self.W[1][0][0] = 1
+		y = self.__onehot_code(y)
 
-		for _ in range(int(np.ceil(self.num_epochs / self.batch_size))) :
+		for _ in range(self.num_epochs * int(np.ceil(X.shape[0] / self.batch_size))) :
 			# building the batch
-			batch_index = np.random.choice(X.shape[0] , self.batch_size , replace=False)
+			# print(_ , self.batch_size , self.num_epochs , ' --> ')
+			print('Epochs',(_+1) * self.batch_size / X.shape[0] , '/' ,self.num_epochs)
+			batch_index = np.random.choice(X.shape[0] , self.batch_size , replace=False)		# it stopes the redundancy of datapoint in same batch
+
+			derivative_W = [np.zeros(x.shape) for x in self.W]
+			derivative_W = np.array(derivative_W , dtype = object)
+
+			derivative_B = [np.zeros(x.shape) for x in self.B]
+			derivative_B = np.array(derivative_B , dtype = object)
+
 			for data_point in batch_index :
 				A = self.__forward_phase(X[data_point,:])
-				self.__backward_phase(A , y[data_point,:])
+				theta_W , theta_B = self.__backward_phase(A , y[data_point,:])
 
-				# updating the theta and delta W
-			# forward phase
-			# self.__forward_phase([np.array([1.0,2.0,3.0]) , np.zeros((3,))])
-			# self.__forward_phase(np.array([1.0,2.0,3.0]))
+				derivative_W += theta_W
+				derivative_B += theta_B
+
+			delta_W = self.learning_rate * (derivative_W/self.batch_size)
+			delta_B = self.learning_rate * (derivative_B/self.batch_size)
+
+			self.__update_NeuralNetwork(delta_W , delta_B)
 
 		return self
 
@@ -378,9 +395,12 @@ class MyNeuralNetwork():
 		y : 2-dimensional numpy array of shape (n_samples, n_classes) which contains the 
             class wise prediction probabilities.
         """
-
+		y_proba = np.empty((X.shape[0],self.layer_sizes[-1]))
+		for data_point in range(X.shape[0]) :
+				A = self.__forward_phase(X[data_point,:])
+				y_proba[data_point] = A[-2]
 		# return the numpy array y which contains the predicted values
-		return None
+		return y_proba
 
 	def predict(self, X):
 		"""
@@ -396,7 +416,12 @@ class MyNeuralNetwork():
 		"""
 
 		# return the numpy array y which contains the predicted values
-		return None
+		y = np.empty(X.shape[0] , dtype=np.int)
+		for data_point in range(X.shape[0]) :
+				A = self.__forward_phase(X[data_point,:])
+				y[data_point] = np.argmax(A[-2])
+
+		return y
 
 	def score(self, X, y):
 		"""
@@ -412,16 +437,23 @@ class MyNeuralNetwork():
 		-------
 		acc : float value specifying the accuracy of the model on the provided testing set
 		"""
-
+		y_pred = self.predict(X)
+		accuracy = np.sum(y_pred == y) / y.shape[0]
 		# return the numpy array y which contains the predicted values
-		return None
+		return accuracy
 
 # MyNeuralNetwork(4,[784,500,200,10] , 'sigmoid' , 0.01 , 'zero' , 100 ,  100)
 # a = MyNeuralNetwork(3 , [3,2,1] , 'sigmoid' , 0.01 , 'zero' , 100 ,  100)
 # a.fit([1],[1])
 # MyNeuralNetwork(3 , [3,2,1] , 'sigmoid' , 0.01 , 'random' , 100 ,  100)
 
-a = MyNeuralNetwork(3 , [3,2,1] , 'tanh' , 0.01 , 'zero' , 4 ,  1)
-X = np.array([np.array([1,2,3]),np.array([4,5,6]),np.array([7,8,9]),np.array([10,11,12])])
-y = np.array([np.array([1]),np.array([0]),np.array([1]),np.array([0])])
-a.fit(X,y)
+# a = MyNeuralNetwork(3 , [3,2,2] , 'sigmoid' , 0.01 , 'zero' , 2 ,  10)
+# X = np.array([np.array([1,2,3]),np.array([4,5,6]),np.array([7,8,9]),np.array([10,11,12])])
+# y = np.array([1,0,1,0])
+# a.fit(X,y)
+
+# print(a.predict(X))
+# print(a.score(X,y))
+# p = a.predict_proba(X)
+# print(p.shape)
+# a.t(y , y_req)
