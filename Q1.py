@@ -50,9 +50,11 @@ class MyNeuralNetwork():
 		self.W = []	# weights
 		self.B = []	# bias associated with perceptron
 
+		np.random.seed(7)			# setting a random seed
+
 		for i in range(1, n_layers) :
 			self.W.append(w_init((layer_sizes[i-1] , layer_sizes[i])))
-			self.B.append(w_init((layer_sizes[i] , )))
+			self.B.append(self.zero_init((layer_sizes[i] , )))			# assigning weights to 0, however we can change it desired weight_init
 
 		self.W = np.array(self.W , dtype = object)
 		self.B = np.array(self.B , dtype = object)
@@ -165,7 +167,7 @@ class MyNeuralNetwork():
 		-------
 		x_calc : 1-dimensional numpy array after calculating the necessary function over X
 		"""
-		return 1
+		return np.full(X.shape,1)
 
 	def tanh(self, X):
 		"""
@@ -193,7 +195,7 @@ class MyNeuralNetwork():
 		-------
 		x_calc : 1-dimensional numpy array after calculating the necessary function over X
 		"""
-		return 1 - np.power(np.tanh(X),2)
+		return 1 - np.power(X,2)
 
 	def softmax(self, X):
 		"""
@@ -222,7 +224,7 @@ class MyNeuralNetwork():
 		-------
 		x_calc : 1-dimensional numpy array after calculating the necessary function over X
 		"""
-		return None # TODO : need to complete softmax_grad
+		return X * (1-X) # TODO : need to complete softmax_grad
 
 	def zero_init(self, shape):
 		"""
@@ -251,7 +253,7 @@ class MyNeuralNetwork():
 		-------
 		weight : 2-dimensional numpy array which contains the initial weights for the requested layer
 		"""
-		return np.random.randn(shape[0] , shape[1])			# FIXME : what is diffrece between rand and randn
+		return 0.01*np.random.random(shape)
 
 	def normal_init(self, shape):
 		"""
@@ -265,7 +267,21 @@ class MyNeuralNetwork():
 		-------
 		weight : 2-dimensional numpy array which contains the initial weights for the requested layer
 		"""
-		return None # TODO : implement this
+		return 0.01*np.random.normal(0,1,shape)
+
+	def fill_testing_data(self, X, y , verbose = 0 , clip_threshold = 0.01):
+		self.X_test = X
+		self.y_test = self.__onehot_code(y)
+		self.verbose = verbose
+		self.clip_threshold = clip_threshold
+
+	def __grad_clipping(self, x , threshold = -1) :
+		if(threshold < 0) :
+			threshold = self.clip_threshold
+		norm = np.linalg.norm(x)
+		if(norm > threshold) :
+			return x * (threshold / norm)
+		return x
 
 	def __forward_phase(self , input_layer):
 		"""
@@ -285,15 +301,19 @@ class MyNeuralNetwork():
 				# here A[i-1] is denoting perceptron of current layer, however A[i-2] denotes perceptron of previous layer
 				# W[i-1] denotes all the synaptic weights between layer i-1 and i.
 				# Similarly, B[i-1] is bias associated with current layer
-			A[i-1] = self.activation(A[i-1])				# appling activation after successfully calucalting z function for all perceptron in layer
+			if(i == self.n_layers-1) :
+				A[i-1] = self.softmax(A[i-1])				# appling activation after successfully calucalting z function for output layer perceptron
+			else :
+				A[i-1] = self.activation(A[i-1])				# appling activation after successfully calucalting z function for all perceptron in layer
 		# A.pop()		# poping out the input layer
-		# print(A)
 		return A
 	
 	def __backward_phase(self , A , y):
 		Local_gradient = [a.copy().astype(np.float) for a in A]			# cloning B for getting accurate shapes of layers and perceptron
 
-		Local_gradient[-2] = (y - A[-2]) * self.activation_derivative(A[-2])
+		# Local_gradient[-2] = self.__grad_clipping(y - self.softmax(A[-2])) * self.__grad_clipping(self.activation_derivative(A[-2]))
+		# TODO : Update Log loss gradient
+		Local_gradient[-2] = self.__grad_clipping(A[-2] - y)			# derivative of cross entroy with softmax acctivation
 
 		for layer_num in range (self.n_layers - 2 , -1 , -1) :
 			# 2 (as last two layer are input and output) + 1 (last index is 1 less than len) = 3
@@ -304,10 +324,8 @@ class MyNeuralNetwork():
 				# self.W[layer_num][perceptron_num] is weights between current layer's perceptron and right layer (i.e. next layer towards output layer).
 				# Local_gradient[layer_num] is calculated local gradient of right layer (i.e. next layer towards output layer)
 
-				# Local_gradient[layer_num-1][perceptron_num] = mul * self.activation_derivative(A[layer_num-1][perceptron_num])
-			Local_gradient[layer_num-1] = Local_gradient[layer_num-1] * self.activation_derivative(A[layer_num-1])
+			Local_gradient[layer_num-1] = Local_gradient[layer_num-1] * self.__grad_clipping(self.activation_derivative(A[layer_num-1]))
 
-		# print(Local_gradient , A)
 		theta_W = []
 		for layer_num in range (self.n_layers-1) :
 			tmp = np.matmul(A[layer_num-1].reshape(-1,1) , Local_gradient[layer_num].reshape(1,-1))
@@ -315,9 +333,6 @@ class MyNeuralNetwork():
 
 		Local_gradient.pop()																		# poping the input layer
 		return np.array(theta_W , dtype=object) , np.array(Local_gradient , dtype=object)
-
-		# return delta_W and delta_B
-		# return np.multiply(np.array(Local_gradient , dtype = object) , np.array(A , dtype = object))
 
 	def __update_NeuralNetwork(self , delta_W , delta_B):
 		self.W = self.W - delta_W
@@ -329,6 +344,12 @@ class MyNeuralNetwork():
 			one_hot_coded_y[i,y[i]] = 1
 
 		return one_hot_coded_y
+
+	def cross_etropy(self, desired, predicted):
+		clip = 0.001
+		predicted = np.clip(predicted , 0.001 , 1-clip)
+		error = -desired*np.log(predicted)-(1-desired)*np.log(1-predicted)
+		return error
 
 	def fit(self, X, y):
 		"""
@@ -346,40 +367,60 @@ class MyNeuralNetwork():
 		"""
 
 		# fit function has to return an instance of itself or else it won't work with test.py
-		# print(self.activation , self.batch_size , self.num_epochs)
 
 		if(self.batch_size > X.shape[0]) :
 			print('invalid batch size')
 			return
 
-		np.random.seed(12)
-
 		y = self.__onehot_code(y)
 
-		for _ in range(self.num_epochs * int(np.ceil(X.shape[0] / self.batch_size))) :
-			# building the batch
-			# print(_ , self.batch_size , self.num_epochs , ' --> ')
-			print('Epochs',(_+1) * self.batch_size / X.shape[0] , '/' ,self.num_epochs)
-			batch_index = np.random.choice(X.shape[0] , self.batch_size , replace=False)		# it stopes the redundancy of datapoint in same batch
+		train_error = np.empty(self.num_epochs)
+		test_error = np.empty(self.num_epochs)
 
-			derivative_W = [np.zeros(x.shape) for x in self.W]
-			derivative_W = np.array(derivative_W , dtype = object)
+		for epochs in range(self.num_epochs) :
+			if(self.verbose > 0) :
+				print('Epochs',epochs+1,'/',self.num_epochs)
+			err_vec = np.zeros(self.layer_sizes[-1] , dtype=np.float)
+			for batch in range(int(np.ceil(X.shape[0]/self.batch_size))) :				
+				batch_index = np.random.choice(X.shape[0] , self.batch_size , replace=False)		# it stopes the redundancy of datapoint in same batch
 
-			derivative_B = [np.zeros(x.shape) for x in self.B]
-			derivative_B = np.array(derivative_B , dtype = object)
+				derivative_W = [np.zeros(x.shape) for x in self.W]
+				derivative_W = np.array(derivative_W , dtype = object)
 
-			for data_point in batch_index :
-				A = self.__forward_phase(X[data_point,:])
-				theta_W , theta_B = self.__backward_phase(A , y[data_point,:])
+				derivative_B = [np.zeros(x.shape) for x in self.B]
+				derivative_B = np.array(derivative_B , dtype = object)
 
-				derivative_W += theta_W
-				derivative_B += theta_B
+				for data_point in batch_index :
+					A = self.__forward_phase(X[data_point,:])
+					theta_W , theta_B = self.__backward_phase(A , y[data_point,:])
 
-			delta_W = self.learning_rate * (derivative_W/self.batch_size)
-			delta_B = self.learning_rate * (derivative_B/self.batch_size)
+					err_vec += self.cross_etropy(y[data_point,:] , A[-2])
+					
+					derivative_W += theta_W
+					derivative_B += theta_B
 
-			self.__update_NeuralNetwork(delta_W , delta_B)
+				delta_W = self.learning_rate * (derivative_W/self.batch_size)
+				delta_B = self.learning_rate * (derivative_B/self.batch_size)
 
+				self.__update_NeuralNetwork(delta_W , delta_B)
+			# training error vs epochs
+			err_vec /= int(np.ceil(X.shape[0]/self.batch_size)) * self.batch_size
+			train_error[epochs] = np.sum(err_vec) / self.layer_sizes[-1]		# averaging the sum of error for all the output perceptron
+
+			# testing error vs epochs
+			err_vec = np.zeros(self.layer_sizes[-1] , dtype=np.float)
+			last_layer_feature = np.empty((self.X_test.shape[0] , self.layer_sizes[-2]))
+			for data_point in range(self.X_test.shape[0]) :
+				A = self.__forward_phase(self.X_test[data_point,:])
+				err_vec += self.cross_etropy(self.y_test[data_point,:] , A[-2])
+				if(epochs+1 == self.num_epochs) :			# for 2nd question 5th part
+					last_layer_feature[data_point] = A[-3]
+			err_vec /= self.X_test.shape[0]
+			test_error[epochs] = np.sum(err_vec) / self.layer_sizes[-1]			# averaging the sum of error for all the output perceptron
+			if(self.verbose > 1) :
+				print('train error =' , train_error[epochs] , ', test error =' , test_error[epochs])
+
+		self.errors_feature = [train_error , test_error , last_layer_feature]
 		return self
 
 	def predict_proba(self, X):
@@ -442,18 +483,25 @@ class MyNeuralNetwork():
 		# return the numpy array y which contains the predicted values
 		return accuracy
 
+	def get_errors_featres(self):
+		return self.errors_feature
+
 # MyNeuralNetwork(4,[784,500,200,10] , 'sigmoid' , 0.01 , 'zero' , 100 ,  100)
 # a = MyNeuralNetwork(3 , [3,2,1] , 'sigmoid' , 0.01 , 'zero' , 100 ,  100)
 # a.fit([1],[1])
 # MyNeuralNetwork(3 , [3,2,1] , 'sigmoid' , 0.01 , 'random' , 100 ,  100)
 
-# a = MyNeuralNetwork(3 , [3,2,2] , 'sigmoid' , 0.01 , 'zero' , 2 ,  10)
+# a = MyNeuralNetwork(3 , [3,2,2] , 'relu' , 0.01 , 'random' , 2 ,  90)
 # X = np.array([np.array([1,2,3]),np.array([4,5,6]),np.array([7,8,9]),np.array([10,11,12])])
 # y = np.array([1,0,1,0])
+# a.fill_testing_data(X,y)
 # a.fit(X,y)
+
+# print(a.W)
 
 # print(a.predict(X))
 # print(a.score(X,y))
 # p = a.predict_proba(X)
+# print(p)
 # print(p.shape)
 # a.t(y , y_req)
